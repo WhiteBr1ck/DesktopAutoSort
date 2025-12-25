@@ -144,6 +144,11 @@ class TrayIcon(QObject):
         
         self.menu.addSeparator()
         
+        # About
+        self.about_action = QAction("ℹ️ 关于", self.menu)
+        self.about_action.triggered.connect(self._show_about)
+        self.menu.addAction(self.about_action)
+        
         # Exit
         self.exit_action = QAction("❌ 退出", self.menu)
         self.menu.addAction(self.exit_action)
@@ -172,6 +177,23 @@ class TrayIcon(QObject):
                       QSystemTrayIcon.ActivationReason.DoubleClick):
             # Left click - show settings
             self.settings_requested.emit()
+    
+    def _show_about(self):
+        """Show about dialog."""
+        from PyQt6.QtWidgets import QMessageBox
+        from version import VERSION
+        
+        msg = QMessageBox()
+        msg.setWindowTitle("关于 DesktopAutoSort")
+        msg.setText(f"<h2>DesktopAutoSort</h2>")
+        msg.setInformativeText(
+            f"<p>版本: <b>v{VERSION}</b></p>"
+            f"<p>Windows 桌面图标整理工具</p>"
+            f"<hr>"
+            f"<p>开源协议: MIT License</p>"
+        )
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.exec()
     
     def _on_save_layout(self):
         """Handle save layout action."""

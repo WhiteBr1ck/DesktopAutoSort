@@ -22,15 +22,25 @@ def main():
             print(f"Cleaning {folder}/...")
             shutil.rmtree(folder)
     
+    # Get version
+    from version import VERSION
+    
+    # Determine architecture
+    import platform
+    arch = "x64" if platform.machine().endswith('64') else "x86"
+    
+    exe_name = f"DesktopAutoSort_v{VERSION}_{arch}"
+    
     # Build command
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--onefile",           # Single EXE file
         "--windowed",          # No console window
-        "--name", "DesktopAutoSort",
+        "--name", exe_name,
         "--add-data", "core;core",
         "--add-data", "ui;ui",
         "--add-data", "config;config",
+        "--add-data", "version.py;.",
         "main.py"
     ]
     
@@ -50,7 +60,7 @@ def main():
     if result.returncode == 0:
         print("\n" + "="*50)
         print("Build successful!")
-        print("Output: dist/DesktopAutoSort.exe")
+        print(f"Output: dist/{exe_name}.exe")
         print("="*50)
     else:
         print("\nBuild failed!")
