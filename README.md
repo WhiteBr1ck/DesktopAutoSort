@@ -12,30 +12,6 @@ Windows 桌面图标整理工具。根据文件类型自动分组和排列桌面
 - **全局快捷键**：Ctrl+Shift+O 一键整理（可自定义）
 - **系统托盘**：后台运行，点击图标打开设置
 
-## 系统要求
-
-- Windows 10/11
-- Python 3.8+
-- 必须关闭桌面"自动排列图标"功能
-
-## 安装
-
-### 从源码运行
-
-```bash
-git clone https://github.com/your-username/DesktopAutoSort.git
-cd DesktopAutoSort
-pip install -r requirements.txt
-python main.py
-```
-
-### 打包为 EXE
-
-```bash
-python build.py
-```
-
-生成的可执行文件在 `dist/DesktopAutoSort.exe`
 
 ## 使用说明
 
@@ -53,4 +29,4 @@ python build.py
 
 ## 开源协议
 
-MIT License - 详见 [LICENSE](LICENSE) 文件
+MIT License
