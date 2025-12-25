@@ -38,19 +38,37 @@ class TrayIcon(QObject):
     
     def _set_default_icon(self):
         """Set a default icon for the tray."""
+        import os
+        import sys
         # Try to load custom icon, fall back to system icon
         try:
-            icon = QIcon("resources/icon.png")
-            if icon.isNull():
+            # Check for icon.ico in current directory or resources
+            icon_paths = ["icon.ico", "resources/icon.png", "resources/icon.ico"]
+            found_icon = False
+            
+            # For PyInstaller bundled app, check _MEIPASS first
+            if getattr(sys, 'frozen', False):
+                base_dir = sys._MEIPASS
+            else:
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            
+            for path in icon_paths:
+                full_path = os.path.join(base_dir, path)
+                if os.path.exists(full_path):
+                    self.tray_icon.setIcon(QIcon(full_path))
+                    found_icon = True
+                    break
+            
+            if not found_icon:
                 # Use a system icon as fallback
                 icon = QApplication.style().standardIcon(
                     QApplication.style().StandardPixmap.SP_DesktopIcon
                 )
-            self.tray_icon.setIcon(icon)
+                self.tray_icon.setIcon(icon)
         except Exception:
             pass
         
-        self.tray_icon.setToolTip("桌面图标整理")
+        self.tray_icon.setToolTip("DesktopAutoSort")
     
     def _create_menu(self):
         """Create the context menu."""

@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QSplitter, QFormLayout, QFrame
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QKeySequence, QIcon
 
 from core.classifier import IconGroup, Classifier
 from core.layout import LayoutManager, ArrangeDirection, SortOrder
@@ -463,6 +463,148 @@ class MonitorTab(QWidget):
             self.all_radio.setChecked(True)
 
 
+class HotkeyTab(QWidget):
+    """Tab for hotkey settings."""
+    
+    hotkey_changed = pyqtSignal(str, bool)  # hotkey, enabled
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.current_hotkey = "ctrl+shift+o"
+        self.is_recording = False
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        
+        # Enable hotkey
+        self.enable_cb = QCheckBox("启用全局快捷键")
+        self.enable_cb.setChecked(True)
+        self.enable_cb.toggled.connect(self._on_settings_changed)
+        layout.addWidget(self.enable_cb)
+        
+        # Hotkey group
+        hotkey_group = QGroupBox("一键整理快捷键")
+        hotkey_layout = QHBoxLayout(hotkey_group)
+        
+        self.hotkey_edit = QLineEdit()
+        self.hotkey_edit.setReadOnly(True)
+        self.hotkey_edit.setPlaceholderText("点击录制按钮设置快捷键")
+        self.hotkey_edit.setText("Ctrl+Shift+O")
+        hotkey_layout.addWidget(self.hotkey_edit)
+        
+        self.record_btn = QPushButton("录制")
+        self.record_btn.clicked.connect(self._toggle_recording)
+        hotkey_layout.addWidget(self.record_btn)
+        
+        self.reset_btn = QPushButton("重置")
+        self.reset_btn.clicked.connect(self._reset_hotkey)
+        hotkey_layout.addWidget(self.reset_btn)
+        
+        layout.addWidget(hotkey_group)
+        
+        # Info
+        info_label = QLabel("提示: 按下 Ctrl+Shift+O 可快速整理桌面图标。\n录制时请按下想要的快捷键组合。")
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: gray;")
+        layout.addWidget(info_label)
+        
+        layout.addStretch()
+    
+    def _toggle_recording(self):
+        """Toggle hotkey recording mode."""
+        if self.is_recording:
+            self._stop_recording()
+        else:
+            self._start_recording()
+    
+    def _start_recording(self):
+        """Start recording hotkey."""
+        self.is_recording = True
+        self.record_btn.setText("停止")
+        self.hotkey_edit.setText("按下快捷键...")
+        self.hotkey_edit.setFocus()
+        # Install event filter to capture key presses
+        self.hotkey_edit.installEventFilter(self)
+    
+    def _stop_recording(self):
+        """Stop recording hotkey."""
+        self.is_recording = False
+        self.record_btn.setText("录制")
+        self.hotkey_edit.removeEventFilter(self)
+        self.hotkey_edit.setText(self._format_hotkey(self.current_hotkey))
+    
+    def eventFilter(self, obj, event):
+        """Capture key presses during recording."""
+        from PyQt6.QtCore import QEvent
+        from PyQt6.QtGui import QKeyEvent
+        
+        if obj == self.hotkey_edit and event.type() == QEvent.Type.KeyPress:
+            key_event = event
+            key = key_event.key()
+            modifiers = key_event.modifiers()
+            
+            # Ignore modifier-only keys
+            from PyQt6.QtCore import Qt
+            if key in (Qt.Key.Key_Control, Qt.Key.Key_Shift, Qt.Key.Key_Alt, Qt.Key.Key_Meta):
+                return True
+            
+            # Build hotkey string
+            parts = []
+            if modifiers & Qt.KeyboardModifier.ControlModifier:
+                parts.append("ctrl")
+            if modifiers & Qt.KeyboardModifier.AltModifier:
+                parts.append("alt")
+            if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                parts.append("shift")
+            
+            # Get key name
+            key_text = QKeySequence(key).toString().lower()
+            if key_text:
+                parts.append(key_text)
+            
+            if len(parts) >= 2:  # Need at least one modifier + key
+                self.current_hotkey = "+".join(parts)
+                self._stop_recording()
+                self._on_settings_changed()
+            
+            return True
+        
+        return super().eventFilter(obj, event)
+    
+    def _reset_hotkey(self):
+        """Reset to default hotkey."""
+        self.current_hotkey = "ctrl+shift+o"
+        self.hotkey_edit.setText("Ctrl+Shift+O")
+        self._on_settings_changed()
+    
+    def _format_hotkey(self, hotkey: str) -> str:
+        """Format hotkey for display."""
+        parts = hotkey.split("+")
+        return "+".join(p.capitalize() for p in parts)
+    
+    def _on_settings_changed(self):
+        """Emit signal when settings change."""
+        self.hotkey_changed.emit(self.current_hotkey, self.enable_cb.isChecked())
+    
+    def get_hotkey(self) -> str:
+        """Get current hotkey."""
+        return self.current_hotkey
+    
+    def set_hotkey(self, hotkey: str):
+        """Set hotkey."""
+        self.current_hotkey = hotkey
+        self.hotkey_edit.setText(self._format_hotkey(hotkey))
+    
+    def is_enabled(self) -> bool:
+        """Check if hotkey is enabled."""
+        return self.enable_cb.isChecked()
+    
+    def set_enabled(self, enabled: bool):
+        """Enable or disable hotkey."""
+        self.enable_cb.setChecked(enabled)
+
+
 class LayoutsTab(QWidget):
     """Tab for layout management."""
     
@@ -589,8 +731,23 @@ class SettingsWindow(QDialog):
         self._setup_ui()
     
     def _setup_ui(self):
-        self.setWindowTitle("桌面图标整理 - 设置")
+        self.setWindowTitle("DesktopAutoSort - Settings")
         self.setMinimumSize(600, 450)
+        
+        # Set window icon
+        import os
+        try:
+            # Check for icon.ico in current directory or resources
+            icon_paths = ["icon.ico", "resources/icon.png", "resources/icon.ico"]
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            
+            for path in icon_paths:
+                full_path = os.path.join(base_dir, path)
+                if os.path.exists(full_path):
+                    self.setWindowIcon(QIcon(full_path))
+                    break
+        except Exception:
+            pass
         
         # Enable minimize button (make it a regular window instead of dialog)
         self.setWindowFlags(
@@ -616,6 +773,10 @@ class SettingsWindow(QDialog):
         # Monitor tab
         self.monitor_tab = MonitorTab()
         self.tabs.addTab(self.monitor_tab, "显示器")
+        
+        # Hotkey tab
+        self.hotkey_tab = HotkeyTab()
+        self.tabs.addTab(self.hotkey_tab, "快捷键")
         
         # Layouts tab
         self.layouts_tab = LayoutsTab(self.layout_manager)

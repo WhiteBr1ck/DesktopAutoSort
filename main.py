@@ -12,7 +12,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
-from PyQt6.QtCore import QSharedMemory
+from PyQt6.QtCore import QSharedMemory, QObject, pyqtSignal
 
 from core.desktop import DesktopIconManager
 from core.classifier import Classifier
@@ -22,6 +22,11 @@ from ui.tray import TrayIcon
 from ui.settings_window import SettingsWindow
 
 
+class HotkeySignalHelper(QObject):
+    """Helper class for thread-safe hotkey signal emission."""
+    hotkey_triggered = pyqtSignal()
+
+
 class DesktopAutoSort:
     """Main application class."""
     
@@ -29,10 +34,13 @@ class DesktopAutoSort:
         self.app = QApplication(sys.argv)
         self.app.setQuitOnLastWindowClosed(False)
         
+        # Set global application icon
+        self._set_app_icon()
+        
         # Single instance check
         self.shared_memory = QSharedMemory("DesktopAutoSort_SingleInstance")
         if not self.shared_memory.create(1):
-            QMessageBox.warning(None, "已运行", "桌面图标整理工具已在运行中。")
+            QMessageBox.warning(None, "已运行", "DesktopAutoSort 已在运行中。")
             sys.exit(1)
         
         # Initialize components
@@ -54,15 +62,122 @@ class DesktopAutoSort:
         # Update tray menu
         self._update_tray_state()
         
+        # Setup global hotkey
+        self._setup_hotkey()
+        
         # Show settings window on startup
         self.show_settings()
     
+    def _set_app_icon(self):
+        """Set global application icon."""
+        from PyQt6.QtGui import QIcon
+        import sys
+        
+        # Check for icon.ico in project root
+        icon_paths = ["icon.ico", "resources/icon.png", "resources/icon.ico"]
+        
+        # For PyInstaller bundled app, check _MEIPASS first
+        if getattr(sys, 'frozen', False):
+            base_dir = sys._MEIPASS
+        else:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        for path in icon_paths:
+            full_path = os.path.join(base_dir, path)
+            if os.path.exists(full_path):
+                self.app.setWindowIcon(QIcon(full_path))
+                break
+    
+    def _setup_hotkey(self):
+        """Setup global hotkey for organize using global-hotkeys."""
+        from global_hotkeys import register_hotkeys, start_checking_hotkeys, stop_checking_hotkeys
+        
+        self.stop_checking_hotkeys = stop_checking_hotkeys
+        self.hotkey_enabled = False
+        
+        # Create signal helper for thread-safe hotkey activation
+        self.hotkey_signal = HotkeySignalHelper()
+        self.hotkey_signal.hotkey_triggered.connect(self.organize_desktop)
+        
+        if self.config.is_hotkey_enabled():
+            hotkey = self.config.get_hotkey()
+            self._register_hotkey(hotkey)
+    
+    def _format_hotkey_for_global_hotkeys(self, hotkey: str) -> str:
+        """Format hotkey string for global-hotkeys (uses 'control + shift + o' format)."""
+        parts = hotkey.lower().split("+")
+        formatted = []
+        
+        for part in parts:
+            part = part.strip()
+            if part == "ctrl":
+                formatted.append("control")
+            elif part == "win":
+                formatted.append("windows")
+            else:
+                formatted.append(part)
+        
+        return " + ".join(formatted)
+    
+    def _register_hotkey(self, hotkey: str):
+        """Register a global hotkey using global-hotkeys."""
+        from global_hotkeys import register_hotkeys, start_checking_hotkeys, stop_checking_hotkeys, clear_hotkeys
+        
+        # Unregister previous hotkeys
+        self._unregister_hotkey()
+        
+        try:
+            formatted = self._format_hotkey_for_global_hotkeys(hotkey)
+            
+            # Define binding - [hotkey, on_press_callback, on_release_callback, actuate_on_partial_release]
+            bindings = [
+                [formatted, None, self._on_hotkey_triggered, True],
+            ]
+            
+            register_hotkeys(bindings)
+            start_checking_hotkeys()
+            self.hotkey_enabled = True
+            print(f"Registered hotkey: {hotkey} -> {formatted}")
+        except Exception as e:
+            print(f"Failed to register hotkey: {e}")
+    
+    def _unregister_hotkey(self):
+        """Unregister current hotkey."""
+        from global_hotkeys import clear_hotkeys, stop_checking_hotkeys
+        
+        if self.hotkey_enabled:
+            try:
+                stop_checking_hotkeys()
+                clear_hotkeys()
+                self.hotkey_enabled = False
+            except Exception:
+                pass
+    
+    def _on_hotkey_triggered(self):
+        """Called when hotkey is pressed."""
+        print("Hotkey triggered!")
+        # Emit signal to trigger organize_desktop from main thread
+        self.hotkey_signal.hotkey_triggered.emit()
+    
+    def _on_hotkey_changed(self, hotkey: str, enabled: bool):
+        """Handle hotkey settings change from UI."""
+        self.config.set_hotkey(hotkey)
+        self.config.set_hotkey_enabled(enabled)
+        self.config.save()
+        
+        if enabled:
+            self._register_hotkey(hotkey)
+        else:
+            self._unregister_hotkey()
+    
     def _load_settings(self):
         """Load settings from config."""
-        # Load classifier settings
-        classifier_data = self.config.get_classifier_data()
-        if classifier_data:
-            self.classifier.from_dict(classifier_data)
+        from core.presets import apply_preset
+        
+        # Always apply the current preset to ensure groups match
+        current_preset = self.config.get_current_preset()
+        apply_preset(self.classifier, current_preset)  # Note: classifier first, then preset_id
+        print(f"Applied preset: {current_preset}")
         
         # Load layout settings
         layout_data = self.config.get_layout_data()
@@ -305,6 +420,11 @@ class DesktopAutoSort:
             self.settings_window.set_monitor_mode(self.config.get_monitor_mode())
             # Sync preset selection between settings and tray
             self.settings_window.groups_tab.preset_applied.connect(self._on_settings_preset_applied)
+            # Connect hotkey settings
+            self.settings_window.hotkey_tab.hotkey_changed.connect(self._on_hotkey_changed)
+            # Load saved hotkey values
+            self.settings_window.hotkey_tab.set_hotkey(self.config.get_hotkey())
+            self.settings_window.hotkey_tab.set_enabled(self.config.is_hotkey_enabled())
         
         self.settings_window.show()
         self.settings_window.raise_()
@@ -313,8 +433,12 @@ class DesktopAutoSort:
     def exit_app(self):
         """Exit the application."""
         self._save_settings()
+        self._unregister_hotkey()
         self.tray.hide()
         self.app.quit()
+        # Force exit in case background threads are still running
+        import os
+        os._exit(0)
     
     def run(self):
         """Run the application."""

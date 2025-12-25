@@ -10,8 +10,16 @@ from dataclasses import dataclass
 
 def get_config_dir() -> str:
     """Get the configuration directory path (data subdirectory)."""
-    # Use 'data' subdirectory in program directory for portability
-    app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    import sys
+    
+    # For PyInstaller bundled app, use the EXE's directory (not _MEIPASS)
+    if getattr(sys, 'frozen', False):
+        # sys.executable is the path to the EXE
+        app_dir = os.path.dirname(sys.executable)
+    else:
+        # Development mode: use project root
+        app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
     config_dir = os.path.join(app_dir, "data")
     os.makedirs(config_dir, exist_ok=True)
     return config_dir
@@ -88,3 +96,19 @@ class ConfigManager:
     def set_current_preset(self, preset_id: str):
         """Set current preset ID."""
         self.set("current_preset", preset_id)
+    
+    def get_hotkey(self) -> str:
+        """Get organize hotkey. Default is Ctrl+Shift+O."""
+        return self.get("hotkey", "ctrl+shift+o")
+    
+    def set_hotkey(self, hotkey: str):
+        """Set organize hotkey."""
+        self.set("hotkey", hotkey)
+    
+    def is_hotkey_enabled(self) -> bool:
+        """Check if hotkey is enabled."""
+        return self.get("hotkey_enabled", True)
+    
+    def set_hotkey_enabled(self, enabled: bool):
+        """Enable or disable hotkey."""
+        self.set("hotkey_enabled", enabled)
