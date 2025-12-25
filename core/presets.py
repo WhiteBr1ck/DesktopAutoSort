@@ -16,17 +16,18 @@ PRESETS: Dict[str, Dict] = {
         "groups": [
             {"name": "系统图标", "is_system_group": True, "priority": 0, "merge_group": "系统"},
             {"name": "快捷方式", "is_shortcut_group": True, "priority": 1, "merge_group": "系统"},
-            {"name": "文件夹", "is_folder_group": True, "priority": 2, "merge_group": ""},
-            {"name": "PDF", "extensions": [".pdf"], "priority": 3, "merge_group": ""},
-            {"name": "Word", "extensions": [".doc", ".docx"], "priority": 4, "merge_group": ""},
-            {"name": "Excel", "extensions": [".xls", ".xlsx"], "priority": 5, "merge_group": ""},
-            {"name": "PPT", "extensions": [".ppt", ".pptx"], "priority": 6, "merge_group": ""},
-            {"name": "文本", "extensions": [".txt", ".rtf", ".md"], "priority": 7, "merge_group": ""},
-            {"name": "图片", "extensions": [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".ico"], "priority": 8, "merge_group": ""},
-            {"name": "视频", "extensions": [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm"], "priority": 9, "merge_group": ""},
-            {"name": "音频", "extensions": [".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a"], "priority": 10, "merge_group": ""},
-            {"name": "压缩包", "extensions": [".zip", ".rar", ".7z", ".tar", ".gz"], "priority": 11, "merge_group": ""},
-            {"name": "程序", "extensions": [".exe", ".msi", ".bat", ".cmd", ".ps1"], "priority": 12, "merge_group": ""},
+            {"name": "程序", "extensions": [".exe", ".msi", ".bat", ".cmd", ".ps1"], "priority": 2, "merge_group": ""},
+            {"name": "文件夹", "is_folder_group": True, "priority": 3, "merge_group": ""},
+            {"name": "PDF", "extensions": [".pdf"], "priority": 4, "merge_group": ""},
+            {"name": "Word", "extensions": [".doc", ".docx"], "priority": 5, "merge_group": ""},
+            {"name": "Excel", "extensions": [".xls", ".xlsx", ".csv"], "priority": 6, "merge_group": ""},
+            {"name": "PPT", "extensions": [".ppt", ".pptx"], "priority": 7, "merge_group": ""},
+            {"name": "文本", "extensions": [".txt", ".rtf", ".md"], "priority": 8, "merge_group": ""},
+            {"name": "图片", "extensions": [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".ico"], "priority": 9, "merge_group": ""},
+            {"name": "视频", "extensions": [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".ts", ".rmvb"], "priority": 10, "merge_group": ""},
+            {"name": "音频", "extensions": [".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a"], "priority": 11, "merge_group": ""},
+            {"name": "压缩包", "extensions": [".zip", ".rar", ".7z", ".tar", ".gz"], "priority": 12, "merge_group": ""},
+            {"name": "网页", "extensions": [".html", ".htm", ".xml", ".xhtml", ".css", ".js"], "priority": 13, "merge_group": ""},
             {"name": "其他", "extensions": [], "priority": 999, "merge_group": ""},
         ]
     },
@@ -255,7 +256,8 @@ def save_custom_preset(name: str, classifier: Classifier) -> bool:
             "is_shortcut_group": g.is_shortcut_group,
             "is_system_group": g.is_system_group,
             "priority": g.priority,
-            "merge_group": g.merge_group
+            "merge_group": g.merge_group,
+            "start_from_right": g.start_from_right
         })
     
     preset = {
@@ -270,6 +272,49 @@ def save_custom_preset(name: str, classifier: Classifier) -> bool:
     _save_custom_presets(custom_presets)
     
     # Also add to in-memory PRESETS
+    PRESETS[preset_id] = preset
+    
+    return True
+
+
+def update_custom_preset(preset_id: str, classifier: Classifier) -> bool:
+    """Update an existing custom preset with current classifier configuration."""
+    if not preset_id or not preset_id.startswith("custom_"):
+        return False
+    
+    if preset_id not in PRESETS:
+        return False
+    
+    # Get existing preset to preserve name
+    existing = PRESETS[preset_id]
+    
+    # Convert classifier groups to preset format
+    groups_data = []
+    for g in classifier.groups:
+        groups_data.append({
+            "name": g.name,
+            "extensions": list(g.extensions),
+            "enabled": g.enabled,
+            "is_folder_group": g.is_folder_group,
+            "is_shortcut_group": g.is_shortcut_group,
+            "is_system_group": g.is_system_group,
+            "priority": g.priority,
+            "merge_group": g.merge_group,
+            "start_from_right": g.start_from_right
+        })
+    
+    preset = {
+        "name": existing["name"],
+        "description": existing.get("description", "用户自定义预设"),
+        "groups": groups_data
+    }
+    
+    # Load existing custom presets and update
+    custom_presets = _load_custom_presets()
+    custom_presets[preset_id] = preset
+    _save_custom_presets(custom_presets)
+    
+    # Also update in-memory PRESETS
     PRESETS[preset_id] = preset
     
     return True

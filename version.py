@@ -1,3 +1,3 @@
 """Version information for DesktopAutoSort."""
 
-VERSION = "0.0.1"
+VERSION = "0.0.2"

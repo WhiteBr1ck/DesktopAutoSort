@@ -14,7 +14,7 @@ from PyQt6.QtGui import QFont, QKeySequence, QIcon
 
 from core.classifier import IconGroup, Classifier
 from core.layout import LayoutManager, ArrangeDirection, SortOrder
-from core.presets import get_all_presets_info, apply_preset, save_custom_preset, delete_custom_preset
+from core.presets import get_all_presets_info, apply_preset, save_custom_preset, delete_custom_preset, update_custom_preset
 
 
 class GroupEditWidget(QWidget):
@@ -121,11 +121,8 @@ class GroupsTab(QWidget):
         select_row.addWidget(QLabel("选择预设:"))
         self.preset_combo = QComboBox()
         self._refresh_presets()
+        self.preset_combo.currentIndexChanged.connect(self._on_preset_combo_changed)
         select_row.addWidget(self.preset_combo, 1)
-        
-        self.apply_preset_btn = QPushButton("应用")
-        self.apply_preset_btn.clicked.connect(self._on_apply_preset)
-        select_row.addWidget(self.apply_preset_btn)
         
         self.delete_preset_btn = QPushButton("删除")
         self.delete_preset_btn.clicked.connect(self._on_delete_preset)
@@ -133,9 +130,19 @@ class GroupsTab(QWidget):
         
         preset_layout.addLayout(select_row)
         
-        # Save preset row
+        # Update current preset button (for custom presets)
+        update_row = QHBoxLayout()
+        self.update_preset_btn = QPushButton("覆盖当前预设")
+        self.update_preset_btn.setToolTip("将当前配置保存到选中的自定义预设（覆盖）")
+        self.update_preset_btn.clicked.connect(self._on_update_preset)
+        self.update_preset_btn.setEnabled(False)  # Disabled until custom preset selected
+        update_row.addWidget(self.update_preset_btn)
+        update_row.addStretch()
+        preset_layout.addLayout(update_row)
+        
+        # Save as new preset row
         save_row = QHBoxLayout()
-        save_row.addWidget(QLabel("保存当前配置为预设:"))
+        save_row.addWidget(QLabel("另存为新预设:"))
         self.preset_name_edit = QLineEdit()
         self.preset_name_edit.setPlaceholderText("输入预设名称")
         save_row.addWidget(self.preset_name_edit, 1)
@@ -170,6 +177,10 @@ class GroupsTab(QWidget):
         self.add_btn.clicked.connect(self._on_add_group)
         btn_layout.addWidget(self.add_btn)
         
+        self.add_spacer_btn = QPushButton("添加间隔")
+        self.add_spacer_btn.clicked.connect(self._on_add_spacer)
+        btn_layout.addWidget(self.add_spacer_btn)
+        
         self.remove_btn = QPushButton("删除分组")
         self.remove_btn.clicked.connect(self._on_remove_group)
         btn_layout.addWidget(self.remove_btn)
@@ -192,28 +203,35 @@ class GroupsTab(QWidget):
         
         # Populate list
         self._refresh_list()
+        self._skip_preset_change = False  # Flag to skip preset change during refresh
     
-    def _on_apply_preset(self):
-        """Apply selected preset."""
+    def _on_preset_combo_changed(self):
+        """Handle preset combo selection change - apply preset directly."""
+        if self._skip_preset_change:
+            return
+            
         preset_id = self.preset_combo.currentData()
-        if preset_id:
-            reply = QMessageBox.question(
-                self, "应用预设",
-                f"确定要应用预设吗？\n当前的分组设置将被替换。",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                apply_preset(self.classifier, preset_id)
-                self._refresh_list()
-                self.groups_changed.emit()
-                self.preset_applied.emit(preset_id)
+        if not preset_id:
+            return
+        
+        # Update button state
+        is_custom = preset_id.startswith("custom_")
+        self.update_preset_btn.setEnabled(is_custom)
+        
+        # Apply preset directly
+        apply_preset(self.classifier, preset_id)
+        self._refresh_list()
+        self.groups_changed.emit()
+        self.preset_applied.emit(preset_id)
     
     def _refresh_presets(self):
         """Refresh the preset combo box."""
+        self._skip_preset_change = True
         self.preset_combo.clear()
         presets = get_all_presets_info()
         for p in presets:
             self.preset_combo.addItem(f"{p['name']} - {p['description']}", p['id'])
+        self._skip_preset_change = False
     
     def _on_save_preset(self):
         """Save current configuration as a custom preset."""
@@ -228,6 +246,26 @@ class GroupsTab(QWidget):
             self._refresh_presets()
         else:
             QMessageBox.warning(self, "错误", "保存预设失败")
+    
+    def _on_update_preset(self):
+        """Update the currently selected custom preset."""
+        preset_id = self.preset_combo.currentData()
+        if not preset_id or not preset_id.startswith("custom_"):
+            QMessageBox.warning(self, "错误", "只能更新自定义预设")
+            return
+        
+        preset_name = self.preset_combo.currentText().split(" - ")[0]
+        reply = QMessageBox.question(
+            self, "覆盖预设",
+            f"确定要覆盖预设 \"{preset_name}\" 吗？\n当前的分组设置将保存到该预设。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            if update_custom_preset(preset_id, self.classifier):
+                QMessageBox.information(self, "成功", f"预设 \"{preset_name}\" 已更新")
+            else:
+                QMessageBox.warning(self, "错误", "更新预设失败")
     
     def _on_delete_preset(self):
         """Delete selected custom preset."""
@@ -311,6 +349,18 @@ class GroupsTab(QWidget):
             self._refresh_list()
             # Select the new group
             self.group_list.setCurrentRow(self.group_list.count() - 1)
+    
+    def _on_add_spacer(self):
+        """Add an empty spacer group."""
+        # Find unique name for spacer
+        spacer_count = sum(1 for g in self.classifier.groups if g.name.startswith("─ 间隔"))
+        name = f"─ 间隔 {spacer_count + 1} ─"
+        
+        group = self.classifier.add_group(name, set(), priority=len(self.classifier.groups))
+        self._refresh_list()
+        # Select the new group
+        self.group_list.setCurrentRow(self.group_list.count() - 1)
+        self.groups_changed.emit()
     
     def _on_remove_group(self):
         """Remove selected group."""
@@ -509,6 +559,24 @@ class HotkeyTab(QWidget):
         info_label.setStyleSheet("color: gray;")
         layout.addWidget(info_label)
         
+        # Autostart section
+        autostart_group = QGroupBox("开机自启动")
+        autostart_layout = QVBoxLayout(autostart_group)
+        
+        from core.autostart import is_autostart_enabled
+        
+        self.autostart_cb = QCheckBox("开机时自动启动 DesktopAutoSort")
+        self.autostart_cb.setChecked(is_autostart_enabled())
+        self.autostart_cb.toggled.connect(self._on_autostart_changed)
+        autostart_layout.addWidget(self.autostart_cb)
+        
+        autostart_info = QLabel("启用后，程序会在 Windows 登录时自动启动并最小化到系统托盘。")
+        autostart_info.setWordWrap(True)
+        autostart_info.setStyleSheet("color: gray;")
+        autostart_layout.addWidget(autostart_info)
+        
+        layout.addWidget(autostart_group)
+        
         layout.addStretch()
     
     def _toggle_recording(self):
@@ -603,6 +671,20 @@ class HotkeyTab(QWidget):
     def set_enabled(self, enabled: bool):
         """Enable or disable hotkey."""
         self.enable_cb.setChecked(enabled)
+    
+    def _on_autostart_changed(self, enabled: bool):
+        """Handle autostart checkbox change."""
+        from core.autostart import set_autostart
+        
+        if set_autostart(enabled):
+            status = "已启用" if enabled else "已禁用"
+            print(f"Autostart {status}")
+        else:
+            # Failed, revert checkbox
+            self.autostart_cb.blockSignals(True)
+            self.autostart_cb.setChecked(not enabled)
+            self.autostart_cb.blockSignals(False)
+            QMessageBox.warning(self, "错误", "设置开机自启动失败")
 
 
 class LayoutsTab(QWidget):
@@ -774,14 +856,14 @@ class SettingsWindow(QDialog):
         self.monitor_tab = MonitorTab()
         self.tabs.addTab(self.monitor_tab, "显示器")
         
-        # Hotkey tab
-        self.hotkey_tab = HotkeyTab()
-        self.tabs.addTab(self.hotkey_tab, "快捷键")
-        
         # Layouts tab
         self.layouts_tab = LayoutsTab(self.layout_manager)
         self.layouts_tab.layout_restored.connect(self.layout_restored.emit)
         self.tabs.addTab(self.layouts_tab, "布局管理")
+        
+        # Settings tab (previously Hotkey tab)
+        self.hotkey_tab = HotkeyTab()
+        self.tabs.addTab(self.hotkey_tab, "设置")
         
         layout.addWidget(self.tabs)
         

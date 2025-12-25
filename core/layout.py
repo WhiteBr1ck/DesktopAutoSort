@@ -173,17 +173,22 @@ class LayoutManager:
         right = work_area[2] - self.settings.margin_right
         
         # Get groups that have icons, in priority order
+        # Also include empty groups (they act as spacers)
         active_groups = []
         for group in groups:
             if group.name in classified_icons and classified_icons[group.name]:
                 active_groups.append((group, classified_icons[group.name]))
+            elif group.enabled and not group.extensions and not group.is_folder_group and not group.is_shortcut_group and not group.is_system_group:
+                # Empty group with no extensions = spacer
+                active_groups.append((group, []))
         
         if not active_groups:
             return positions
         
         # Merge groups with same merge_group value
         # Store (group_priority, icon) tuples so we can sort by priority first
-        merged_groups = []  # List of (merge_group_id, list of (priority, icon) tuples)
+        # Also store group's start_from_right setting
+        merged_groups = []  # List of (merge_group_id, list of (priority, icon) tuples, start_from_right)
         processed_merge_ids = set()
         
         for group, icons in active_groups:
@@ -192,19 +197,22 @@ class LayoutManager:
             if merge_id and merge_id not in processed_merge_ids:
                 # Find all groups with this merge_id and combine their icons with priorities
                 combined_icons = []
+                # Use the first group's start_from_right for merged group
+                group_start_from_right = False
                 for g, g_icons in active_groups:
                     if g.merge_group == merge_id:
                         for icon in g_icons:
                             combined_icons.append((g.priority, icon))
-                merged_groups.append((merge_id, combined_icons))
+                        if not group_start_from_right:
+                            group_start_from_right = g.start_from_right
+                merged_groups.append((merge_id, combined_icons, group_start_from_right))
                 processed_merge_ids.add(merge_id)
             elif not merge_id:
                 # No merge group, keep as individual (all same priority)
                 icons_with_priority = [(group.priority, icon) for icon in icons]
-                merged_groups.append((group.name, icons_with_priority))
+                merged_groups.append((group.name, icons_with_priority, group.start_from_right))
         
         # Settings
-        from_right = self.settings.start_from_right
         is_vertical = self.settings.direction == ArrangeDirection.VERTICAL
         
         # Calculate grid dimensions
@@ -248,34 +256,30 @@ class LayoutManager:
         if is_vertical:
             # === VERTICAL LAYOUT (Columns) ===
             # Each group gets its own column(s), filling downward
-            current_col = max_cols - 1 if from_right else 0
+            # Groups with start_from_right=True are placed from the right side
             
-            group_list = list(reversed(merged_groups)) if from_right else list(merged_groups)
+            # Separate groups into left-side and right-side
+            left_groups = [(gid, icons, sfr) for gid, icons, sfr in merged_groups if not sfr]
+            right_groups = [(gid, icons, sfr) for gid, icons, sfr in merged_groups if sfr]
             
-            for group_id, icons in group_list:
+            # Place left-side groups from left
+            current_col = 0
+            for group_id, icons, _ in left_groups:
                 sorted_icons = self._sort_icons(icons)
                 group_start_col = current_col
                 
                 for i, icon in enumerate(sorted_icons):
-                    # Preferred position within group's columns
                     col_offset = i // max_rows
                     row_idx = i % max_rows
+                    preferred_col = min(max_cols - 1, group_start_col + col_offset)
                     
-                    if from_right:
-                        preferred_col = max(0, group_start_col - col_offset)
-                    else:
-                        preferred_col = min(max_cols - 1, group_start_col + col_offset)
-                    
-                    # Check if preferred position is free
                     if (preferred_col, row_idx) not in occupied_cells:
                         col, row = preferred_col, row_idx
                     else:
-                        # Find next free cell
                         result = get_next_free_cell(preferred_col, row_idx, prefer_vertical=True)
                         if result:
                             col, row = result
                         else:
-                            # Grid is full, skip this icon
                             continue
                     
                     x = origin_x + (col * h_spacing)
@@ -283,19 +287,44 @@ class LayoutManager:
                     positions[icon.name] = (x, y)
                     occupied_cells.add((col, row))
                 
-                # Move to next column(s) for next group
                 cols_used = max(1, (len(sorted_icons) + max_rows - 1) // max_rows)
-                if from_right:
-                    current_col = max(0, current_col - cols_used)
-                else:
-                    current_col = min(max_cols - 1, current_col + cols_used)
+                current_col = min(max_cols - 1, current_col + cols_used)
+            
+            # Place right-side groups from right (in reverse order so first group is rightmost)
+            current_col = max_cols - 1
+            for group_id, icons, _ in reversed(right_groups):
+                sorted_icons = self._sort_icons(icons)
+                group_start_col = current_col
+                
+                for i, icon in enumerate(sorted_icons):
+                    col_offset = i // max_rows
+                    row_idx = i % max_rows
+                    preferred_col = max(0, group_start_col - col_offset)
+                    
+                    if (preferred_col, row_idx) not in occupied_cells:
+                        col, row = preferred_col, row_idx
+                    else:
+                        result = get_next_free_cell(preferred_col, row_idx, prefer_vertical=True)
+                        if result:
+                            col, row = result
+                        else:
+                            continue
+                    
+                    x = origin_x + (col * h_spacing)
+                    y = origin_y + (row * v_spacing)
+                    positions[icon.name] = (x, y)
+                    occupied_cells.add((col, row))
+                
+                cols_used = max(1, (len(sorted_icons) + max_rows - 1) // max_rows)
+                current_col = max(0, current_col - cols_used)
                     
         else:
             # === HORIZONTAL LAYOUT (Rows) ===
             # Each group gets its own row(s), filling rightward
+            # For horizontal layout, start_from_right means icons fill from right side
             current_row = 0
             
-            for group_id, icons in merged_groups:
+            for group_id, icons, start_from_right in merged_groups:
                 sorted_icons = self._sort_icons(icons)
                 group_start_row = current_row
                 
@@ -306,7 +335,7 @@ class LayoutManager:
                     
                     preferred_row = min(max_rows - 1, group_start_row + row_offset)
                     
-                    if from_right:
+                    if start_from_right:
                         preferred_col = max_cols - 1 - col_idx
                     else:
                         preferred_col = col_idx

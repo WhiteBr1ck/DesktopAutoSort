@@ -174,10 +174,17 @@ class DesktopAutoSort:
         """Load settings from config."""
         from core.presets import apply_preset
         
-        # Always apply the current preset to ensure groups match
-        current_preset = self.config.get_current_preset()
-        apply_preset(self.classifier, current_preset)  # Note: classifier first, then preset_id
-        print(f"Applied preset: {current_preset}")
+        # Load classifier settings - prefer saved data over preset
+        classifier_data = self.config.get_classifier_data()
+        if classifier_data and classifier_data.get("groups"):
+            # Use saved classifier data
+            self.classifier.from_dict(classifier_data)
+            print(f"Loaded saved classifier settings ({len(self.classifier.groups)} groups)")
+        else:
+            # No saved data, apply current preset
+            current_preset = self.config.get_current_preset()
+            apply_preset(self.classifier, current_preset)
+            print(f"Applied preset: {current_preset}")
         
         # Load layout settings
         layout_data = self.config.get_layout_data()
